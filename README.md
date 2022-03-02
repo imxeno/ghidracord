@@ -1,5 +1,6 @@
-<div align="center"><img src="./.github/ghidracord.png" width="600px" />
+<div align="center">
 
-# Discord Rich Presence for Ghidra
+# <img src="./.github/ghidracord.png" width="400px" alt="Ghidracord" /><br/>
+Discord Rich Presence plugin for Ghidra
 
 </div>
