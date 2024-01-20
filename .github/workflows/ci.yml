@@ -40,7 +40,7 @@ jobs:
       - name: Prepare the workflow artifact
         id: prepare-artifact
         run: |
-          echo "ghidracord_version=`ls dist | head -n 1 | cut -f 1 -d '.'`" >> $GITHUB_OUTPUT
+          echo "ghidracord_version=`ls dist | head -n 1 | sed 's/\.[^.]*$//'" >> $GITHUB_OUTPUT
           unzip -o dist/*.zip -d dist/
           rm dist/*.zip
       - name: Archive production artifacts
