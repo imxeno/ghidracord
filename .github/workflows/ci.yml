@@ -37,7 +37,13 @@ jobs:
           GHIDRA_INSTALL_DIR: /opt/ghidra
         with:
           arguments: buildExtension
+      - name: Prepare the workflow artifact
+        id: prepare-artifact
+        run: |
+          echo "ghidracord_version=`ls | head -n 1 | cut -f 1 -d '.'`" >> $GITHUB_STATE
+          unzip -o dist/*.zip
       - name: Archive production artifacts
-        uses: kittaakos/upload-artifact-as-is@v0
+        uses: actions/upload-artifact@v4
         with:
+          name: ${{ steps.prepare-artifact.outputs.ghidracord_version }}
           path: dist/*.zip
