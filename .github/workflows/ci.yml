@@ -1,0 +1,43 @@
+name: Java CI with Gradle
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Ghidra
+        run: |
+          cd /tmp
+          curl -s https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest \
+          | grep "browser_download_url.*zip" \
+          | cut -d : -f 2,3 \
+          | tr -d \" \
+          | wget -qi -
+          unzip ghidra*.zip -d /opt
+          rm ghidra*.zip
+          mv /opt/ghidra_* /opt/ghidra
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: "17"
+          distribution: "temurin"
+      - name: Build with Gradle
+        uses: gradle/gradle-build-action@bd5760595778326ba7f1441bcf7e88b49de61a25 # v2.6.0
+        env:
+          GHIDRA_INSTALL_DIR: /opt/ghidra
+        with:
+          arguments: buildExtension
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: dist/*.zip
