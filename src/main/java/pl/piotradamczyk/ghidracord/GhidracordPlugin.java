@@ -23,6 +23,8 @@ import net.arikia.dev.drpc.DiscordRichPresence;
 )
 //@formatter:on
 public class GhidracordPlugin extends ProgramPlugin {
+    // keeps track of last time RPC was updated
+    private long runningSince = 0;
 
     /**
      * Plugin constructor.
@@ -56,12 +58,7 @@ public class GhidracordPlugin extends ProgramPlugin {
             return;
         }
 
-        String desc = switch (this.getTool().getName()) {
-            case "CodeBrowser" -> "Examining \"";
-            case "Debugger" -> "Debugging \"";
-            case "Version Tracking" -> "Version Tracking \"";
-            default -> "Examining \"";
-        } + currentProgram.getName() + "\"";
+        String desc = this.getCurrentProgram().getName();
 
         String status = null;
         if (this.getTool().getToolName().equals("CodeBrowser")) {// current function name
@@ -119,14 +116,18 @@ public class GhidracordPlugin extends ProgramPlugin {
     private void updateRichPresence(String programStatus, String subStatus) {
         String program = programStatus == null ? "Idle" : programStatus;
         String sub = subStatus == null ? "" : subStatus;
-        DiscordRichPresence.Builder rich = new DiscordRichPresence.Builder(subStatus)
-                .setBigImage("logo", "Ghidra")
-                .setStartTimestamps(System.currentTimeMillis());
-        this.setSmallIcon(rich);
 
-        rich.setDetails(programStatus);
+        if (runningSince == 0) {
+            runningSince = System.currentTimeMillis();
+        }
 
-        DiscordRPC.discordUpdatePresence(rich.build());
+        DiscordRichPresence.Builder rpc = new DiscordRichPresence.Builder(sub);
+        this.setSmallIcon(rpc);
+        rpc.setBigImage("logo", "Ghidra");
+        rpc.setStartTimestamps(runningSince);
+        rpc.setDetails(program);
+
+        DiscordRPC.discordUpdatePresence(rpc.build());
     }
 
     private void setSmallIcon(DiscordRichPresence.Builder builder) {
