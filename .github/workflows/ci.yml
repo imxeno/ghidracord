@@ -40,7 +40,7 @@ jobs:
       - name: Prepare the workflow artifact
         id: prepare-artifact
         run: |
-          echo "ghidracord_version=`ls /dist | head -n 1 | cut -f 1 -d '.'`" >> $GITHUB_STATE
+          echo "ghidracord_version=`ls /dist | head -n 1 | cut -f 1 -d '.'`" >> $GITHUB_OUTPUT
           unzip -o dist/*.zip
       - name: Archive production artifacts
         uses: actions/upload-artifact@v4
