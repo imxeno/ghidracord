@@ -47,4 +47,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.prepare-artifact.outputs.ghidracord_version }}
-          path: dist
+          path: dist/*
