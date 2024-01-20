@@ -38,6 +38,6 @@ jobs:
         with:
           arguments: buildExtension
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v4
+        uses: kittaakos/upload-artifact-as-is@v0
         with:
           path: dist/*.zip
