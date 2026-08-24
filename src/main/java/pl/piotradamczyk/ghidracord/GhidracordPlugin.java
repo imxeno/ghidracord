@@ -68,7 +68,7 @@ public class GhidracordPlugin extends ProgramPlugin {
                 if (functionManager != null) {
                     Function currentFunc = functionManager.getFunctionContaining(currentAddress);
                     if (currentFunc != null) {
-                        long offset = this.currentLocation.getAddress().getOffset();
+                        long offset = this.currentLocation.getAddress().getOffset() - currentFunc.getEntryPoint().getOffset();
                         status = currentFunc.getName() + " + 0x" + Long.toHexString(offset);
                     }
                 }
