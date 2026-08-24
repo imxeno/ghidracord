@@ -1,0 +1,197 @@
+name: Release for new Ghidra versions
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the latest Ghidra version without publishing a release
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: ghidracord-latest-ghidra-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Check latest Ghidra release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Discover latest Ghidra version
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+
+          upstream_release="$(gh api repos/NationalSecurityAgency/ghidra/releases/latest)"
+          upstream_tag="$(jq -r '.tag_name' <<<"$upstream_release")"
+          upstream_url="$(jq -r '.html_url' <<<"$upstream_release")"
+
+          if [[ ! "$upstream_tag" =~ ^Ghidra_([0-9]+(\.[0-9]+)*)_build$ ]]; then
+            echo "Unexpected upstream release tag: $upstream_tag" >&2
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          version_regex="${version//./[.]}"
+
+          covered=false
+          while IFS= read -r asset_name; do
+            if [[ "$asset_name" =~ ^ghidra_${version_regex}_PUBLIC_[0-9]{8}_ghidracord\.zip$ ]]; then
+              covered=true
+              break
+            fi
+          done < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[].assets[].name'
+          )
+
+          should_build=true
+          if [[ "$covered" == "true" && "$DRY_RUN" != "true" ]]; then
+            should_build=false
+          fi
+
+          source_sha="$(git rev-parse HEAD)"
+          {
+            echo "version=$version"
+            echo "upstream_url=$upstream_url"
+            echo "covered=$covered"
+            echo "dry_run=$DRY_RUN"
+            echo "should_build=$should_build"
+            echo "source_sha=$source_sha"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Ghidra release check"
+            echo "- Latest upstream version: [$version]($upstream_url)"
+            echo "- Matching Ghidracord release exists: $covered"
+            echo "- Dry run: $DRY_RUN"
+            echo "- Build required: $should_build"
+            echo "- Source commit: \`$source_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up JDK 21
+        if: steps.discover.outputs.should_build == 'true'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Install Ghidra ${{ steps.discover.outputs.version }}
+        if: steps.discover.outputs.should_build == 'true'
+        uses: antoniovazquezblanco/setup-ghidra@75c7686eb0b3e48eb7880941b6cac63e5fca8432 # v2.1.5
+        with:
+          version: ${{ steps.discover.outputs.version }}
+          sha256sum: online
+          auth_token: ${{ github.token }}
+
+      - name: Set up Gradle
+        if: steps.discover.outputs.should_build == 'true'
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Build extension
+        if: steps.discover.outputs.should_build == 'true'
+        run: ./gradlew clean buildExtension --no-daemon
+
+      - name: Verify release artifact
+        if: steps.discover.outputs.should_build == 'true'
+        id: artifact
+        env:
+          GHIDRA_VERSION: ${{ steps.discover.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          artifacts=(dist/*.zip)
+          if (( ${#artifacts[@]} != 1 )); then
+            echo "Expected exactly one release artifact, found ${#artifacts[@]}." >&2
+            exit 1
+          fi
+
+          artifact_path="${artifacts[0]}"
+          artifact_name="$(basename "$artifact_path")"
+          version_regex="${GHIDRA_VERSION//./[.]}"
+          if [[ ! "$artifact_name" =~ ^ghidra_${version_regex}_PUBLIC_([0-9]{8})_ghidracord\.zip$ ]]; then
+            echo "Unexpected artifact name: $artifact_name" >&2
+            exit 1
+          fi
+
+          {
+            echo "path=$artifact_path"
+            echo "name=$artifact_name"
+            echo "build_date=${BASH_REMATCH[1]}"
+          } >> "$GITHUB_OUTPUT"
+          sha256sum "$artifact_path"
+
+      - name: Upload validated artifact
+        if: steps.discover.outputs.should_build == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Ghidracord-${{ steps.discover.outputs.version }}
+          path: ${{ steps.artifact.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish release
+        if: steps.discover.outputs.should_build == 'true' && steps.discover.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHIDRA_VERSION: ${{ steps.discover.outputs.version }}
+          UPSTREAM_URL: ${{ steps.discover.outputs.upstream_url }}
+          SOURCE_SHA: ${{ steps.discover.outputs.source_sha }}
+          BUILD_DATE: ${{ steps.artifact.outputs.build_date }}
+          ARTIFACT_PATH: ${{ steps.artifact.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          version_regex="${GHIDRA_VERSION//./[.]}"
+          while IFS= read -r asset_name; do
+            if [[ "$asset_name" =~ ^ghidra_${version_regex}_PUBLIC_[0-9]{8}_ghidracord\.zip$ ]]; then
+              echo "A matching release appeared while this workflow was building; skipping publication."
+              echo "- Publication skipped because another run covered this version." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[].assets[].name'
+          )
+
+          tag="v${GHIDRA_VERSION}_${BUILD_DATE}"
+          if gh api --silent "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}"; then
+            echo "Tag $tag already exists without a matching release asset; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          short_source="${SOURCE_SHA:0:7}"
+          notes=$(printf '%s\n' \
+            '## Ghidracord changes' \
+            '' \
+            '- Automated compatibility build for the latest upstream Ghidra release.' \
+            '' \
+            '## Compatibility' \
+            '' \
+            "- Built and verified for [Ghidra ${GHIDRA_VERSION}](${UPSTREAM_URL})." \
+            "- Built from Ghidracord commit [\`${short_source}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${SOURCE_SHA}).")
+
+          gh release create "$tag" "$ARTIFACT_PATH" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "Ghidracord for Ghidra v${GHIDRA_VERSION}" \
+            --notes "$notes" \
+            --latest
+
+          echo "- Published release: \`$tag\`" >> "$GITHUB_STEP_SUMMARY"
